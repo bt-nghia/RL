@@ -66,7 +66,7 @@ class DDPG(object):
         self.actor_target = copy.deepcopy(self.actor)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=3e-4)
 
-        self.critic = Critic(input_dim, action_dim)
+        self.critic = Critic(input_dim, action_dim).to(device)
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=3e-4)
 
@@ -76,7 +76,7 @@ class DDPG(object):
 
     def select_action(self, state):
         state = torch.FloatTensor(state.reshape(1, -1)).to(device)
-        return self.actor(state).cpu().data.numpy().flattern()
+        return self.actor(state).cpu().data.numpy().flatten()
 
 
     def train(
@@ -107,10 +107,10 @@ class DDPG(object):
 
         # polyak update
         for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-            target_param.copy_(param.data * self.tau + (1-self.tau) * target_param.data)
+            target_param.data.copy_(param.data * self.tau + (1-self.tau) * target_param.data)
 
         for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-            target_param.copy_(param.data * self.tau + (1-self.tau) * target_param.data)
+            target_param.data.copy_(param.data * self.tau + (1-self.tau) * target_param.data)
  
 
     def save(self, filename):

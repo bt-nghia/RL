@@ -109,7 +109,7 @@ if __name__ == "__main__":
         state = next_state
         episode_reward += reward
 
-        if t > args.statrt_timesteps:
+        if t > args.start_timesteps:
             policy.train(replay_buffer, args.batch_size)
 
         if done:
@@ -119,7 +119,7 @@ if __name__ == "__main__":
             episode_timesteps = 0
             episode_num += 1
 
-        if (t+1) % args.eval.freq == 0:
-            evaluations.append(eval_policy(policy, args,env, args.seed))
+        if (t+1) % args.eval_freq == 0:
+            evaluations.append(eval_policy(policy, args.env, args.seed))
             np.save(f"./results/{file_name}", evaluations)
             if args.save_model: policy.save(f"./models/{file_name}")
