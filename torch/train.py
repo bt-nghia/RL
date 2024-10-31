@@ -5,7 +5,7 @@ import argparse
 import os
 
 from ddpg import DDPG
-import torch.utils as utils
+from utils import ReplayBuffer
 
 
 def eval_policy(policy, env_name, seed, eval_episodes=10):

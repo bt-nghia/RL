@@ -1,12 +1,11 @@
+import copy
+import functools
+
 import jax
 import optax
 import jax.numpy as jnp
 import flax.linen as nn
-
 import flax.training.train_state as train_state
-import copy
-from flax.traverse_util import flatten_dict
-import functools
 
 
 def mse_loss(a, b):
