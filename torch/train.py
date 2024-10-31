@@ -4,7 +4,7 @@ import torch
 import argparse
 import os
 
-from jax.ddpg import DDPG
+from ddpg import DDPG
 import torch.utils as utils
 
 
