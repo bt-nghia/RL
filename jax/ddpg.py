@@ -6,6 +6,7 @@ import flax.linen as nn
 import flax.training.train_state as train_state
 import copy
 from flax.traverse_util import flatten_dict
+import functools
 
 
 def mse_loss(a, b):
@@ -92,7 +93,7 @@ class DDPG(object):
         state = jnp.array(state).reshape(1, -1)
         return self.actor.apply(self.actor_state.params, state).flatten()
 
-    @jax.jit
+    @functools.partial(jax.jit, static_argnums=0)
     def critic_loss(
             self,
             state,
@@ -111,7 +112,7 @@ class DDPG(object):
         loss = mse_loss(current_q, target_q)
         return loss
     
-    @jax.jit
+    @functools.partial(jax.jit, static_argnums=0)
     def actor_loss(
             self,
             state,
@@ -127,7 +128,6 @@ class DDPG(object):
         qvalue = self.critic.apply(critic_target_params, state, self.actor.apply(actor_params, state))
         return -qvalue.mean()
 
-    @jax.jit
     def train(
             self,
             replay_buffer,
