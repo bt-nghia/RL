@@ -11,9 +11,6 @@ from flax.traverse_util import flatten_dict
 def mse_loss(a, b):
     return jnp.mean(jnp.square(a-b))
 
-def neg_loss(a):
-    return -a.mean()
-
 @jax.jit
 def polyak_update(src, tgt, tau):
     params = jax.tree.map(
@@ -130,6 +127,7 @@ class DDPG(object):
         qvalue = self.critic.apply(critic_target_params, state, self.actor.apply(actor_params, state))
         return -qvalue.mean()
 
+    @jax.jit
     def train(
             self,
             replay_buffer,
