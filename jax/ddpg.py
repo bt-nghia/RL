@@ -8,10 +8,10 @@ import copy
 from flax.traverse_util import flatten_dict
 
 
-def mse_loss(a, b):
+def mse_loss(params, a, b):
     return jnp.mean(jnp.square(a-b))
 
-def neg_loss(a):
+def neg_loss(params, a):
     return -a.mean()
 
 def polyak_update(src, tgt, tau):
@@ -87,39 +87,40 @@ class DDPG(object):
         )
         self.critic_target_params = copy.deepcopy(critic_params)
 
+        self.gamma = gamma
+        self.tau = tau
+
 
     def select_action(self, state):
         state = jnp.array(state).reshape(1, -1)
         return self.actor.apply(self.actor_state.params, state).flatten()
 
 
-    @jax.jit
+    # @jax.jit
     def train(
             self,
             replay_buffer,
             batch_size,
-            gamma,
-            tau,
     ):
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
 
         # call TD loss
-        target_q = self.critic.apply(self.critic_target_params, next_state, self.actor_target(next_state))
-        target_q = reward + not_done * (gamma * target_q)
+        target_q = self.critic.apply(self.critic_target_params, next_state, self.actor.apply(self.actor_target_params, next_state))
+        target_q = reward + not_done * (self.gamma * target_q)
         current_q = self.critic.apply(self.critic_state.params, state, action)
-        q_value_actor = self.critic.apply(self.critic_target_params, state, self.actor_state(state))
+        q_value_actor = self.critic.apply(self.critic_target_params, state, self.actor.apply(self.actor_state.params ,state))
         
         # update critic
-        critic_grads = jax.grad(mse_loss)(current_q, target_q)
-        self.critic_state = self.critic_state.apply_gradients(critic_grads)
+        critic_grads = jax.grad(mse_loss)(self.critic_state.params, current_q, target_q)
+        self.critic_state = self.critic_state.apply_gradients(grads=critic_grads)
 
         # update actor
         actor_grads = jax.grad(neg_loss)(q_value_actor)
-        self.actor_state = self.actor_state.apply_gradients(actor_grads)
+        self.actor_state = self.actor_state.apply_gradients(grads=actor_grads)
 
         # polyak update
-        self.actor_target_params = copy.deepcopy(polyak_update(self.actor_state.params, self.actor_target_params, tau))
-        self.critic_target_params = copy.deepcopy(polyak_update(self.critic_state.params, self.critic_target_params, tau))
+        self.actor_target_params = copy.deepcopy(polyak_update(self.actor_state.params, self.actor_target_params, self.tau))
+        self.critic_target_params = copy.deepcopy(polyak_update(self.critic_state.params, self.critic_target_params, self.tau))
 
 # if __name__ == "__main__":
 #     DDPG(10, 10, 10, 0.99, 0.99)

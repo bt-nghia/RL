@@ -83,7 +83,7 @@ if __name__ == "__main__":
             ).clip(-max_action, +max_action)
 
         next_state, rw, done, _ = env.step(action)
-        done_bool = float(done) if episode_timesteps < env._max_episode_steps else 0
+        done_bool = float(done) if episode_timesteps < env._max_episode_steps else 0.
 
         replay_buffer.add(state, action, next_state, rw, done_bool)
         state = next_state
