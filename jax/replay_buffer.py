@@ -1,5 +1,4 @@
-import jax
-import jax.numpy as jnp
+import numpy as np
 
 
 class ReplayBuffer(object):
@@ -8,11 +7,11 @@ class ReplayBuffer(object):
 		self.ptr = 0
 		self.size = 0
 
-		self.state = jnp.zeros((max_size, state_dim))
-		self.action = jnp.zeros((max_size, action_dim))
-		self.next_state = jnp.zeros((max_size, state_dim))
-		self.reward = jnp.zeros((max_size, 1))
-		self.not_done = jnp.zeros((max_size, 1))
+		self.state = np.zeros((max_size, state_dim))
+		self.action = np.zeros((max_size, action_dim))
+		self.next_state = np.zeros((max_size, state_dim))
+		self.reward = np.zeros((max_size, 1))
+		self.not_done = np.zeros((max_size, 1))
 
 
 	def add(self, state, action, next_state, reward, done):
@@ -27,12 +26,12 @@ class ReplayBuffer(object):
 
 
 	def sample(self, batch_size):
-		ind = jax.random.randint(jax.random.key(0), minval=0, maxval=self.size, shape=batch_size)
+		ind = np.random.randint(0, self.size, size=batch_size)
 
 		return (
-			jnp.array(self.state[ind]).to(self.device),
-			jnp.array(self.action[ind]).to(self.device),
-			jnp.array(self.next_state[ind]).to(self.device),
-			jnp.array(self.reward[ind]).to(self.device),
-			jnp.array(self.not_done[ind]).to(self.device)
+			np.array(self.state[ind]).to(self.device),
+			np.array(self.action[ind]).to(self.device),
+			np.array(self.next_state[ind]).to(self.device),
+			np.array(self.reward[ind]).to(self.device),
+			np.array(self.not_done[ind]).to(self.device)
 		)

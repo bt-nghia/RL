@@ -78,7 +78,7 @@ if __name__ == "__main__":
             action = env.action_space.sample()
         else:
             action = (
-                policy.select_ation(state) + \
+                policy.select_action(state) + \
                 np.random.normal(0, max_action * args.expl_noise, size=action_dim)
             ).clip(-max_action, +max_action)
 

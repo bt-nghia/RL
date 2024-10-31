@@ -88,9 +88,9 @@ class DDPG(object):
         self.critic_target_params = copy.deepcopy(critic_params)
 
 
-    def select_ation(self, state):
+    def select_action(self, state):
         state = jnp.array(state).reshape(1, -1)
-        return self.actor.apply(self.actor_state.params, state).numpy().flatten()
+        return self.actor.apply(self.actor_state.params, state).flatten()
 
 
     @jax.jit
