@@ -29,9 +29,9 @@ class ReplayBuffer(object):
 		ind = np.random.randint(0, self.size, size=batch_size)
 
 		return (
-			np.array(self.state[ind]).to(self.device),
-			np.array(self.action[ind]).to(self.device),
-			np.array(self.next_state[ind]).to(self.device),
-			np.array(self.reward[ind]).to(self.device),
-			np.array(self.not_done[ind]).to(self.device)
+			np.array(self.state[ind]),
+			np.array(self.action[ind]),
+			np.array(self.next_state[ind]),
+			np.array(self.reward[ind]),
+			np.array(self.not_done[ind])
 		)
