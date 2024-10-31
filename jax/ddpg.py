@@ -8,12 +8,13 @@ import copy
 from flax.traverse_util import flatten_dict
 
 
-def mse_loss(params, a, b):
+def mse_loss(a, b):
     return jnp.mean(jnp.square(a-b))
 
-def neg_loss(params, a):
+def neg_loss(a):
     return -a.mean()
 
+@jax.jit
 def polyak_update(src, tgt, tau):
     params = jax.tree.map(
         lambda src, tgt: src * tau + tgt * (1.0-tau),
@@ -96,7 +97,39 @@ class DDPG(object):
         return self.actor.apply(self.actor_state.params, state).flatten()
 
 
-    # @jax.jit
+    def critic_loss(
+            self,
+            state,
+            action,
+            next_state,
+            reward,
+            not_done,
+            critic_params,
+            critic_target_params,
+            actor_params,
+            actor_target_params,
+    ):
+        next_q = self.critic.apply(critic_target_params, next_state, self.actor.apply(actor_target_params, next_state))
+        target_q = reward + next_q * self.gamma * not_done
+        current_q = self.critic.apply(critic_params, state, action)
+        loss = mse_loss(current_q, target_q)
+        return loss
+    
+    def actor_loss(
+            self,
+            state,
+            action,
+            next_state,
+            reward,
+            not_done,
+            critic_params,
+            critic_target_params,
+            actor_params,
+            actor_target_params,
+    ):
+        qvalue = self.critic.apply(critic_target_params, state, self.actor.apply(actor_params, state))
+        return -qvalue
+
     def train(
             self,
             replay_buffer,
@@ -104,19 +137,28 @@ class DDPG(object):
     ):
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
 
-        # call TD loss
-        target_q = self.critic.apply(self.critic_target_params, next_state, self.actor.apply(self.actor_target_params, next_state))
-        target_q = reward + not_done * (self.gamma * target_q)
-        current_q = self.critic.apply(self.critic_state.params, state, action)
-        q_value_actor = self.critic.apply(self.critic_target_params, state, self.actor.apply(self.actor_state.params ,state))
+        # # call TD loss
+        # target_q = self.critic.apply(self.critic_target_params, next_state, self.actor.apply(self.actor_target_params, next_state))
+        # target_q = reward + not_done * (self.gamma * target_q)
+        # current_q = self.critic.apply(self.critic_state.params, state, action)
+        # q_value_actor = self.critic.apply(self.critic_target_params, state, self.actor.apply(self.actor_state.params ,state))
         
-        # update critic
-        critic_grads = jax.grad(mse_loss)(self.critic_state.params, current_q, target_q)
-        self.critic_state = self.critic_state.apply_gradients(grads=critic_grads)
+        # # update critic
+        # critic_grads = jax.grad(mse_loss)(self.critic_state.params, current_q, target_q)
+        # self.critic_state = self.critic_state.apply_gradients(grads=critic_grads)
 
-        # update actor
-        actor_grads = jax.grad(neg_loss)(q_value_actor)
-        self.actor_state = self.actor_state.apply_gradients(grads=actor_grads)
+        # # update actor
+        # actor_grads = jax.grad(neg_loss)(q_value_actor)
+        # self.actor_state = self.actor_state.apply_gradients(grads=actor_grads)
+
+        # critic_loss = self.critic_loss(state, action, next_state, reward, not_done, self.critic_state.params, self.critic_target_params, self.actor_state.params, self.actor_target_params)
+        # actor_loss = self.critic_loss(state, action, next_state, reward, not_done, self.critic_state.params, self.critic_target_params, self.actor_state.params, self.actor_target_params)
+
+        critic_grad = jax.grad(self.critic_loss)(state, action, next_state, reward, not_done, self.critic_state.params, self.critic_target_params, self.actor_state.params, self.actor_target_params)
+        actor_grad = jax.grad(self.actor_loss)(state, action, next_state, reward, not_done, self.critic_state.params, self.critic_target_params, self.actor_state.params, self.actor_target_params)
+
+        self.critic_state = self.critic_state.apply_gradients(critic_grad)
+        self.actor_state = self.actor_state.apply_gradients(actor_grad)
 
         # polyak update
         self.actor_target_params = copy.deepcopy(polyak_update(self.actor_state.params, self.actor_target_params, self.tau))
