@@ -80,7 +80,7 @@ if __name__ == "__main__":
 
     policy = DDPG(**kwargs)
 
-    replay_buffer = utils.ReplayBuffer(input_dim, action_dim)
+    replay_buffer = ReplayBuffer(input_dim, action_dim)
     evaluations = [eval_policy(policy, args.env, args.seed)]
 
 
