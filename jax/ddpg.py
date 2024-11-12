@@ -105,7 +105,7 @@ class DDPG(object):
             actor_params,
             actor_target_params,
     ):
-        next_q = self.critic.apply(critic_target_params, next_state, self.actor.apply(actor_target_params, next_state))
+        next_q = jax.lax.stop_gradient(self.critic.apply(critic_target_params, next_state, self.actor.apply(actor_target_params, next_state)))
         target_q = reward + next_q * self.gamma * not_done
         current_q = self.critic.apply(critic_params, state, action)
         loss = mse_loss(current_q, target_q)
