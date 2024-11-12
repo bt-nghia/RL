@@ -88,6 +88,9 @@ class DDPG(object):
         self.gamma = gamma
         self.tau = tau
 
+        del actor_params
+        del critic_params
+
     @functools.partial(jax.jit, static_argnums=0)
     def select_action(self, state):
         state = jnp.array(state).reshape(1, -1)
