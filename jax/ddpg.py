@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 import flax.training.train_state as train_state
 
-
+@jax.jit
 def mse_loss(a, b):
     return jnp.mean(jnp.square(a-b))
 
@@ -88,6 +88,7 @@ class DDPG(object):
         self.gamma = gamma
         self.tau = tau
 
+    @functools.partial(jax.jit, static_argnums=0)
     def select_action(self, state):
         state = jnp.array(state).reshape(1, -1)
         return self.actor.apply(self.actor_state.params, state).flatten()
@@ -127,6 +128,7 @@ class DDPG(object):
         qvalue = self.critic.apply(critic_target_params, state, self.actor.apply(actor_params, state))
         return -qvalue.mean()
 
+    @functools.partial(jax.jit, static_argnums=[0,1,2])
     def train(
             self,
             replay_buffer,

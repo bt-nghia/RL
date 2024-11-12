@@ -19,7 +19,7 @@ def eval_policy(policy, env_name, seed, eval_episodes=10):
 
     avg_rw /= eval_episodes
     print("----------------------------")
-    print("EVALUATION AVERAGE REWARD: %.2f" % avg_rw)
+    print("EVALUATION AVERAGE REWARD: %.2f" % (avg_rw))
     print("----------------------------")
     return avg_rw
 
