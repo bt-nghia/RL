@@ -43,6 +43,10 @@ if __name__ == "__main__":
     parser.add_argument("--load_model", default="")                 # Model load file name, "" doesn't load, "default" uses file_name
     args = parser.parse_args()
 
+    print("-----------------------------")
+    print(f"Policy: {args.policy}, Env: {args.env}")
+    print("-----------------------------")
+
     env = gym.make(args.env)
 
     env.seed(args.seed)
@@ -63,7 +67,7 @@ if __name__ == "__main__":
 
     policy = DDPG(**kwargs)
     replay_buffer = ReplayBuffer(input_dim, action_dim)
-    evaluations = []
+    evaluations = [eval_policy(policy, args.env, args.seed)]
 
 
     state, done = env.reset(), False
