@@ -100,7 +100,7 @@ class DDPG(object):
     @functools.partial(jax.jit, static_argnums=0)
     def policy(self, state, params):
         state = jnp.array(state).reshape(1, -1)
-        return self.actor.apply(params, state).flattern()
+        return self.actor.apply(params, state).flatten()
 
 
     @functools.partial(jax.jit, static_argnums=0)
@@ -179,14 +179,14 @@ class DDPG(object):
             batch_size,
     ):
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
-        self.critic_state, self.critic_target_params, self.actor_state, self.actor_target_params = self.udpate(
+        self.critic_state, self.critic_target_params, self.actor_state, self.actor_target_params = self.update(
                                                                                                         state,
                                                                                                         action,
                                                                                                         next_state,
                                                                                                         reward,
                                                                                                         not_done,
-                                                                                                        self.critic_state.params,
+                                                                                                        self.critic_state,
                                                                                                         self.critic_target_params,
-                                                                                                        self.actor_state.params,
+                                                                                                        self.actor_state,
                                                                                                         self.actor_target_params,
                                                                                                     )
