@@ -1,3 +1,5 @@
+"""TODO(bt-nghia): rewrite all functions to pure format"""
+
 import copy
 import functools
 
@@ -65,23 +67,25 @@ class DDPG(object):
             gamma, 
             tau
     ):
+
+        key, skey = jax.random.split(jax.random.key(0))
         self.actor = Actor(input_dim, action_dim, max_action)
-        actor_params = self.actor.init(jax.random.key(0), jnp.empty((1, input_dim)))
-        self.actor_optimizer = optax.adam(3e-4)
+        actor_params = self.actor.init(key, jnp.empty((1, input_dim)))
+        actor_optimizer = optax.adam(3e-4)
         self.actor_state = train_state.TrainState.create(
             apply_fn=self.actor.apply,
             params=actor_params,
-            tx=self.actor_optimizer,
+            tx=actor_optimizer,
         )
         self.actor_target_params = copy.deepcopy(actor_params)
 
         self.critic = Critic(input_dim, action_dim, max_action)
-        critic_params = self.critic.init(jax.random.key(1), jnp.empty((1, input_dim)), jnp.empty((1, action_dim)))
-        self.critic_optimizer = optax.adam(3e-4)
+        critic_params = self.critic.init(skey, jnp.empty((1, input_dim)), jnp.empty((1, action_dim)))
+        critic_optimizer = optax.adam(3e-4)
         self.critic_state = train_state.TrainState.create(
             apply_fn=self.critic.apply,
             params=critic_params,
-            tx=self.critic_optimizer,
+            tx=critic_optimizer,
         )
         self.critic_target_params = copy.deepcopy(critic_params)
 
@@ -90,11 +94,14 @@ class DDPG(object):
 
         del actor_params
         del critic_params
+        del actor_optimizer
+        del critic_optimizer
 
     @functools.partial(jax.jit, static_argnums=0)
-    def select_action(self, state):
+    def policy(self, state, params):
         state = jnp.array(state).reshape(1, -1)
-        return self.actor.apply(self.actor_state.params, state).flatten()
+        return self.actor.apply(params, state).flattern()
+
 
     @functools.partial(jax.jit, static_argnums=0)
     def critic_loss(
@@ -131,23 +138,55 @@ class DDPG(object):
         qvalue = self.critic.apply(critic_target_params, state, self.actor.apply(actor_params, state))
         return -qvalue.mean()
 
-    @functools.partial(jax.jit, static_argnums=[0,1,2])
+    @functools.partial(jax.jit, static_argnums=0)
+    def update(
+            self,
+            state,
+            action,
+            next_state,
+            reward,
+            not_done,
+            critic_state,
+            critic_target_params,
+            actor_state,
+            actor_target_params,
+    ):
+        critic_grad = jax.grad(self.critic_loss, argnums=5)(state, action, next_state, reward, not_done, critic_state.params,
+                                                            critic_target_params, actor_state.params, actor_target_params)
+        actor_grad = jax.grad(self.actor_loss, argnums=7)(state, action, next_state, reward, not_done, critic_state.params, 
+                                                            critic_target_params, actor_state.params, actor_target_params)
+
+        critic_state = critic_state.apply_gradients(grads=critic_grad)
+        actor_state = actor_state.apply_gradients(grads=actor_grad)
+
+        # polyak update
+        actor_target_params = copy.deepcopy(polyak_update(actor_state.params, actor_target_params, self.tau))
+        critic_target_params = copy.deepcopy(polyak_update(critic_state.params, critic_target_params, self.tau))
+
+        return [
+            critic_state,
+            critic_target_params,
+            actor_state,
+            actor_target_params
+        ]
+
+    def select_action(self, state):
+        return self.policy(state, self.actor_state.params)
+
     def train(
             self,
             replay_buffer,
             batch_size,
     ):
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
-
-        critic_grad = jax.grad(self.critic_loss, argnums=5)(state, action, next_state, reward, not_done, self.critic_state.params, self.critic_target_params, self.actor_state.params, self.actor_target_params)
-        actor_grad = jax.grad(self.actor_loss, argnums=7)(state, action, next_state, reward, not_done, self.critic_state.params, self.critic_target_params, self.actor_state.params, self.actor_target_params)
-
-        self.critic_state = self.critic_state.apply_gradients(grads=critic_grad)
-        self.actor_state = self.actor_state.apply_gradients(grads=actor_grad)
-
-        # polyak update
-        self.actor_target_params = copy.deepcopy(polyak_update(self.actor_state.params, self.actor_target_params, self.tau))
-        self.critic_target_params = copy.deepcopy(polyak_update(self.critic_state.params, self.critic_target_params, self.tau))
-
-# if __name__ == "__main__":
-#     DDPG(10, 10, 10, 0.99, 0.99)
+        self.critic_state, self.critic_target_params, self.actor_state, self.actor_target_params = self.udpate(
+                                                                                                        state,
+                                                                                                        action,
+                                                                                                        next_state,
+                                                                                                        reward,
+                                                                                                        not_done,
+                                                                                                        self.critic_state.params,
+                                                                                                        self.critic_target_params,
+                                                                                                        self.actor_state.params,
+                                                                                                        self.actor_target_params,
+                                                                                                    )
