@@ -57,7 +57,7 @@ class Critic(nn.Module):
             nn.Dense(1)
         ])
 
-        self.crt1 = nn.Sequential([
+        self.crt2 = nn.Sequential([
             nn.Dense(256),
             nn.relu,
             nn.Dense(256),
@@ -136,8 +136,8 @@ class TD3(object):
         next_q1, next_q2 = jax.lax.stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
         
         target_q = reward + jnp.minimum(next_q1, next_q2) * self.gamma * not_done
-        current_q = self.critic.apply(critic_params, state, action)
-        loss = mse_loss(current_q, target_q)
+        current_q1, current_q2 = self.critic.apply(critic_params, state, action)
+        loss = mse_loss(current_q1, target_q) + mse_loss(current_q2, target_q)
         return loss
     
     @functools.partial(jax.jit, static_argnums=0)
