@@ -102,7 +102,6 @@ class DDPG(object):
         state = jnp.array(state).reshape(1, -1)
         return self.actor.apply(params, state).flatten()
 
-
     @functools.partial(jax.jit, static_argnums=0)
     def critic_loss(
             self,
@@ -190,3 +189,4 @@ class DDPG(object):
                                                                                                         self.actor_state,
                                                                                                         self.actor_target_params,
                                                                                                     )
+                                                                                                    
