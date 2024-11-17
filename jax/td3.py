@@ -104,6 +104,7 @@ class TD3(object):
         self.gamma = gamma
         self.tau = tau
         self.policy_delay = policy_delay
+        self.iter = 0
 
         del actor_params
         del critic1_params
@@ -131,8 +132,8 @@ class TD3(object):
             actor_target_params,
     ):
         next_action = self.actor.apply(actor_target_params, next_state)
-        next_q1 = jax.lax.stop_gradient(self.critic1.apply(critic1_target_params, next_state, next_action))
-        next_q2 = jax.lax.stop_gradient(self.critic2.apply(critic2_target_params, next_state, next_action))
+        next_q1 = jax.lax.stop_gradient(self.critic.apply(critic1_target_params, next_state, next_action))
+        next_q2 = jax.lax.stop_gradient(self.critic.apply(critic2_target_params, next_state, next_action))
         
         target_q = reward + jnp.minimum(next_q1, next_q2) * self.gamma * not_done
         current_q = self.critic.apply(critic_params, state, action)
@@ -226,7 +227,6 @@ class TD3(object):
             self,
             replay_buffer,
             batch_size,
-            iter=2,
     ):
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
         
@@ -245,7 +245,7 @@ class TD3(object):
             self.actor_target_params,
         )
 
-        if iter % self.policy_delay == 0:
+        if self.iter % self.policy_delay == 0:
             self.critic1_target_params, self.critic2_target_params, \
             self.actor_state, self.actor_target_params = \
             self.update_policy(
@@ -261,4 +261,6 @@ class TD3(object):
                 self.actor_state,
                 self.actor_target_params,
             )
+        
+        self.iter+=1
                                                                                                     
