@@ -1,4 +1,7 @@
-"""TODO(bt-nghia): check algo"""
+"""
+TODO(bt-nghia): check algo reduce critic opt fr 2 to 1
+combine 2 critic
+"""
 
 import copy
 import functools
@@ -46,16 +49,27 @@ class Critic(nn.Module):
     max_action: float
 
     def setup(self):
-        self.ln1 = nn.Dense(256)
-        self.ln2 = nn.Dense(256)
-        self.ln3 = nn.Dense(1)
+        self.crt1 = nn.Sequential([
+            nn.Dense(256),
+            nn.relu,
+            nn.Dense(256),
+            nn.relu,
+            nn.Dense(1)
+        ])
+
+        self.crt1 = nn.Sequential([
+            nn.Dense(256),
+            nn.relu,
+            nn.Dense(256),
+            nn.relu,
+            nn.Dense(1)
+        ])
 
     def __call__(self, state, action):
         inp = jnp.concat([state, action], axis=1)
-        out = nn.relu(self.ln1(inp))
-        out = nn.relu(self.ln2(out))
-        out = self.ln3(out)
-        return out
+        out1 = self.crt1(inp)
+        out2 = self.crt2(inp)
+        return out1, out2
     
 
 class TD3(object):
@@ -81,25 +95,14 @@ class TD3(object):
         self.actor_target_params = copy.deepcopy(actor_params)
         
         self.critic = Critic(input_dim, action_dim, max_action)
-        critic1_params = self.critic.init(skey, jnp.empty((1, input_dim)), jnp.empty((1, action_dim)))
-        critic1_optimizer = optax.adam(3e-4)
-        self.critic1_state = train_state.TrainState.create(
+        critic_params = self.critic.init(skey, jnp.empty((1, input_dim)), jnp.empty((1, action_dim)))
+        critic_optimizer = optax.adam(3e-4)
+        self.critic_state = train_state.TrainState.create(
             apply_fn=self.critic.apply,
-            params=critic1_params,
-            tx=critic1_optimizer,
+            params=critic_params,
+            tx=critic_optimizer,
         )
-        self.critic1_target_params = copy.deepcopy(critic1_params)
-
-        key, skey = jax.random.split(skey)
-        # self.critic2 = Critic(input_dim, action_dim, max_action)
-        critic2_params = self.critic.init(skey, jnp.empty((1, input_dim)), jnp.empty((1, action_dim)))
-        critic2_optimizer = optax.adam(3e-4)
-        self.critic2_state = train_state.TrainState.create(
-            apply_fn=self.critic.apply,
-            params=critic2_params,
-            tx=critic2_optimizer,
-        )
-        self.critic2_target_params = copy.deepcopy(critic2_params)
+        self.critic_target_params = copy.deepcopy(critic_params)
 
         self.gamma = gamma
         self.tau = tau
@@ -107,11 +110,9 @@ class TD3(object):
         self.iter = 0
 
         del actor_params
-        del critic1_params
-        del critic2_params
+        del critic_params
         del actor_optimizer
-        del critic1_optimizer
-        del critic2_optimizer
+        del critic_optimizer
 
     @functools.partial(jax.jit, static_argnums=0)
     def policy(self, state, params):
@@ -127,13 +128,12 @@ class TD3(object):
             reward,
             not_done,
             critic_params,
-            critic1_target_params,
-            critic2_target_params,
+            critic_target_params,
+            actor_params,
             actor_target_params,
     ):
         next_action = self.actor.apply(actor_target_params, next_state)
-        next_q1 = jax.lax.stop_gradient(self.critic.apply(critic1_target_params, next_state, next_action))
-        next_q2 = jax.lax.stop_gradient(self.critic.apply(critic2_target_params, next_state, next_action))
+        next_q1, next_q2 = jax.lax.stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
         
         target_q = reward + jnp.minimum(next_q1, next_q2) * self.gamma * not_done
         current_q = self.critic.apply(critic_params, state, action)
@@ -148,15 +148,13 @@ class TD3(object):
             next_state,
             reward,
             not_done,
-            critic1_params,
-            critic1_target_params,
-            critic2_params,
-            critic2_target_params,
+            critic_params,
+            critic_target_params,
             actor_params,
             actor_target_params,
     ):
-        qvalue = self.critic.apply(critic1_target_params, state, self.actor.apply(actor_params, state))
-        return -qvalue.mean()
+        qvalue1, qvalue2 = self.critic.apply(critic_target_params, state, self.actor.apply(actor_params, state))
+        return -qvalue1.mean()
 
     @functools.partial(jax.jit, static_argnums=0)
     def update_Q(
@@ -166,26 +164,17 @@ class TD3(object):
             next_state,
             reward,
             not_done,
-            critic1_state,
-            critic1_target_params,
-            critic2_state,
-            critic2_target_params,
+            critic_state,
+            critic_target_params,
             actor_state,
             actor_target_params,
     ):
-        critic1_grads = jax.grad(self.critic_loss, argnums=5)(state, action, next_state, reward, not_done, critic1_state.params,
-                                                            critic1_target_params, critic2_target_params, actor_target_params)
-        
-        critic2_grads = jax.grad(self.critic_loss, argnums=5)(state, action, next_state, reward, not_done, critic2_state.params,
-                                                            critic1_target_params, critic2_target_params, actor_target_params)
+        critic_grads = jax.grad(self.critic_loss, argnums=5)(state, action, next_state, reward, not_done, 
+                                                             critic_state.params, critic_target_params,
+                                                             actor_state.params, actor_target_params)
 
-        critic1_state = critic1_state.apply_gradients(grads=critic1_grads)
-        critic2_state = critic2_state.apply_gradients(grads=critic2_grads)
-        
-        return [
-            critic1_state,
-            critic2_state,
-        ]
+        critic_state.apply_gradients(grads=critic_grads)
+        return critic_state
     
     @functools.partial(jax.jit, static_argnums=0)
     def update_policy(
@@ -195,27 +184,23 @@ class TD3(object):
             next_state,
             reward,
             not_done,
-            critic1_state,
-            critic1_target_params,
-            critic2_state,
-            critic2_target_params,
+            critic_state,
+            critic_target_params,
             actor_state,
             actor_target_params,
     ):
-        actor_grad = jax.grad(self.actor_loss, argnums=9)(state, action, next_state, reward, not_done, critic1_state.params, 
-                                                            critic2_target_params, critic2_state.params, critic2_target_params,
-                                                            actor_state.params, actor_target_params)
+        actor_grad = jax.grad(self.actor_loss, argnums=7)(state, action, next_state, reward, not_done, 
+                                                          critic_state.params, critic_target_params, 
+                                                          actor_state.params, actor_target_params)
 
         actor_state = actor_state.apply_gradients(grads=actor_grad)
 
         # polyak update
         actor_target_params = copy.deepcopy(polyak_update(actor_state.params, actor_target_params, self.tau))
-        critic1_target_params = copy.deepcopy(polyak_update(critic1_state.params, critic1_target_params, self.tau))
-        critic2_target_params = copy.deepcopy(polyak_update(critic2_state.params, critic2_target_params, self.tau))
+        critic_target_params = copy.deepcopy(polyak_update(critic_state.params, critic_target_params, self.tau))
 
         return [
-            critic1_target_params,
-            critic2_target_params,
+            critic_target_params,
             actor_state,
             actor_target_params
         ]
@@ -230,23 +215,21 @@ class TD3(object):
     ):
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
         
-        self.critic1_state, self.critic2_state = \
+        self.critic_state = \
         self.update_Q(
             state,
             action,
             next_state,
             reward,
             not_done,
-            self.critic1_state,
-            self.critic1_target_params,
-            self.critic2_state,
-            self.critic2_target_params,
+            self.critic_state,
+            self.critic_target_params,
             self.actor_state,
             self.actor_target_params,
         )
 
         if self.iter % self.policy_delay == 0:
-            self.critic1_target_params, self.critic2_target_params, \
+            self.critic_target_params, \
             self.actor_state, self.actor_target_params = \
             self.update_policy(
                 state,
@@ -254,10 +237,8 @@ class TD3(object):
                 next_state,
                 reward,
                 not_done,
-                self.critic1_state,
-                self.critic1_target_params,
-                self.critic2_state,
-                self.critic2_target_params,
+                self.critic_state,
+                self.critic_target_params,
                 self.actor_state,
                 self.actor_target_params,
             )
