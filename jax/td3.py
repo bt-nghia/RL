@@ -65,7 +65,8 @@ class TD3(object):
             action_dim, 
             max_action, 
             gamma, 
-            tau
+            tau,
+            policy_delay,
     ):
 
         key, skey = jax.random.split(jax.random.key(0))
@@ -102,6 +103,7 @@ class TD3(object):
 
         self.gamma = gamma
         self.tau = tau
+        self.policy_delay = policy_delay
 
         del actor_params
         del critic1_params
@@ -123,11 +125,9 @@ class TD3(object):
             next_state,
             reward,
             not_done,
-            critic1_params,
+            critic_params,
             critic1_target_params,
-            critic2_params,
             critic2_target_params,
-            actor_params,
             actor_target_params,
     ):
         next_action = self.actor.apply(actor_target_params, next_state)
@@ -135,9 +135,8 @@ class TD3(object):
         next_q2 = jax.lax.stop_gradient(self.critic2.apply(critic2_target_params, next_state, next_action))
         
         target_q = reward + jnp.minimum(next_q1, next_q2) * self.gamma * not_done
-        current_q1 = self.critic.apply(critic1_params, state, action)
-        current_q2 = self.critic.apply(critic2_params, state, action)
-        loss = mse_loss(current_q1, target_q) + mse_loss(current_q2, target_q)
+        current_q = self.critic.apply(critic_params, state, action)
+        loss = mse_loss(current_q, target_q)
         return loss
     
     @functools.partial(jax.jit, static_argnums=0)
@@ -159,7 +158,7 @@ class TD3(object):
         return -qvalue.mean()
 
     @functools.partial(jax.jit, static_argnums=0)
-    def update(
+    def update_Q(
             self,
             state,
             action,
@@ -173,24 +172,48 @@ class TD3(object):
             actor_state,
             actor_target_params,
     ):
-        critic_grad = jax.grad(self.critic_loss, argnums=[5, 7])(state, action, next_state, reward, not_done, critic1_state.params,
-                                                            critic1_target_params, critic2_state.params, critic2_target_params, 
-                                                            actor_state.params, actor_target_params)
+        critic1_grads = jax.grad(self.critic_loss, argnums=5)(state, action, next_state, reward, not_done, critic1_state.params,
+                                                            critic1_target_params, critic2_target_params, actor_target_params)
+        
+        critic2_grads = jax.grad(self.critic_loss, argnums=5)(state, action, next_state, reward, not_done, critic2_state.params,
+                                                            critic1_target_params, critic2_target_params, actor_target_params)
+
+        critic1_state = critic1_state.apply_gradients(grads=critic1_grads)
+        critic2_state = critic2_state.apply_gradients(grads=critic2_grads)
+        
+        return [
+            critic1_state,
+            critic2_state,
+        ]
+    
+    @functools.partial(jax.jit, static_argnums=0)
+    def update_policy(
+            self,
+            state,
+            action,
+            next_state,
+            reward,
+            not_done,
+            critic1_state,
+            critic1_target_params,
+            critic2_state,
+            critic2_target_params,
+            actor_state,
+            actor_target_params,
+    ):
         actor_grad = jax.grad(self.actor_loss, argnums=9)(state, action, next_state, reward, not_done, critic1_state.params, 
                                                             critic2_target_params, critic2_state.params, critic2_target_params,
                                                             actor_state.params, actor_target_params)
 
-        critic_state = critic_state.apply_gradients(grads=critic_grad)
         actor_state = actor_state.apply_gradients(grads=actor_grad)
 
         # polyak update
         actor_target_params = copy.deepcopy(polyak_update(actor_state.params, actor_target_params, self.tau))
-        critic_target_params = copy.deepcopy(polyak_update(critic_state.params, critic_target_params, self.tau))
+        critic1_target_params = copy.deepcopy(polyak_update(critic1_state.params, critic1_target_params, self.tau))
+        critic2_target_params = copy.deepcopy(polyak_update(critic2_state.params, critic2_target_params, self.tau))
 
         return [
-            critic1_state,
             critic1_target_params,
-            critic2_state,
             critic2_target_params,
             actor_state,
             actor_target_params
@@ -203,12 +226,12 @@ class TD3(object):
             self,
             replay_buffer,
             batch_size,
+            iter=2,
     ):
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
-        self.critic1_state, self.critic1_target_params, \
-        self.critic2_state, self.critic2_target_params, \
-        self.actor_state, self.actor_target_params \
-        = self.update(
+        
+        self.critic1_state, self.critic2_state = \
+        self.update_Q(
             state,
             action,
             next_state,
@@ -221,4 +244,21 @@ class TD3(object):
             self.actor_state,
             self.actor_target_params,
         )
+
+        if iter % self.policy_delay == 0:
+            self.critic1_target_params, self.critic2_target_params, \
+            self.actor_state, self.actor_target_params = \
+            self.update_policy(
+                state,
+                action,
+                next_state,
+                reward,
+                not_done,
+                self.critic1_state,
+                self.critic1_target_params,
+                self.critic2_state,
+                self.critic2_target_params,
+                self.actor_state,
+                self.actor_target_params,
+            )
                                                                                                     
