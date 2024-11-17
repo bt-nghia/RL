@@ -66,7 +66,7 @@ class TD3(object):
             max_action, 
             gamma, 
             tau,
-            policy_delay,
+            policy_delay=2,
     ):
 
         key, skey = jax.random.split(jax.random.key(0))
