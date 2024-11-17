@@ -2,6 +2,7 @@ import argparse
 import gym
 import numpy as np
 from ddpg import DDPG
+from td3 import TD3
 from replay_buffer import ReplayBuffer
 
 
@@ -64,8 +65,13 @@ if __name__ == "__main__":
         "gamma": args.gamma,
         "tau": args.tau,
     }
-
-    policy = DDPG(**kwargs)
+    if args.policy == "DDPG":
+        policy = DDPG(**kwargs)
+    elif args.policy == "TD3":
+        policy = TD3(**kwargs)
+    else:
+        raise ValueError("INVALID POLICY")
+    
     replay_buffer = ReplayBuffer(input_dim, action_dim)
     evaluations = [eval_policy(policy, args.env, args.seed)]
 
