@@ -202,16 +202,7 @@ class TD3(object):
                                                           actor_state.params, actor_target_params)
 
         actor_state = actor_state.apply_gradients(grads=actor_grad)
-
-        # polyak update
-        actor_target_params = copy.deepcopy(polyak_update(actor_state.params, actor_target_params, self.tau))
-        critic_target_params = copy.deepcopy(polyak_update(critic_state.params, critic_target_params, self.tau))
-
-        return [
-            critic_target_params,
-            actor_state,
-            actor_target_params
-        ]
+        return actor_state
 
     def select_action(self, state):
         return self.policy(state, self.actor_state.params)
@@ -244,8 +235,7 @@ class TD3(object):
         )
 
         if self.iter % self.policy_delay == 0:
-            self.critic_target_params, \
-            self.actor_state, self.actor_target_params = \
+            self.actor_state = \
             self.update_pi(
                 state,
                 action,
@@ -257,3 +247,6 @@ class TD3(object):
                 self.actor_state,
                 self.actor_target_params,
             )
+
+            self.actor_target_params = copy.deepcopy(polyak_update(self.actor_state.params, self.actor_target_params, self.tau))
+            self.critic_target_params = copy.deepcopy(polyak_update(self.critic_state.params, self.critic_target_params, self.tau))
