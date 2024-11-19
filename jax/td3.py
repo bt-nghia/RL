@@ -132,7 +132,7 @@ class TD3(object):
             actor_params,
             actor_target_params,
     ):
-        next_action = self.actor.apply(actor_target_params, next_state)
+        next_action = jax.lax.stop_gradient(self.actor.apply(actor_target_params, next_state))
         next_q1, next_q2 = jax.lax.stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
         
         target_q = reward + jnp.minimum(next_q1, next_q2) * self.gamma * not_done
@@ -153,7 +153,7 @@ class TD3(object):
             actor_params,
             actor_target_params,
     ):
-        qvalue1, qvalue2 = self.critic.apply(critic_target_params, state, self.actor.apply(actor_params, state))
+        qvalue1, qvalue2 = self.critic.apply(critic_params, state, self.actor.apply(actor_params, state))
         return -qvalue1.mean()
 
     @functools.partial(jax.jit, static_argnums=0)
@@ -177,7 +177,7 @@ class TD3(object):
         return critic_state
     
     @functools.partial(jax.jit, static_argnums=0)
-    def update_policy(
+    def update_pi(
             self,
             state,
             action,
@@ -231,7 +231,7 @@ class TD3(object):
         if self.iter % self.policy_delay == 0:
             self.critic_target_params, \
             self.actor_state, self.actor_target_params = \
-            self.update_policy(
+            self.update_pi(
                 state,
                 action,
                 next_state,

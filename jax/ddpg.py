@@ -134,7 +134,7 @@ class DDPG(object):
             actor_params,
             actor_target_params,
     ):
-        qvalue = self.critic.apply(critic_target_params, state, self.actor.apply(actor_params, state))
+        qvalue = self.critic.apply(critic_params, state, self.actor.apply(actor_params, state))
         return -qvalue.mean()
 
     @functools.partial(jax.jit, static_argnums=0)
