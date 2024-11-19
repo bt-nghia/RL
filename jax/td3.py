@@ -81,11 +81,13 @@ class TD3(object):
             gamma, 
             tau,
             policy_delay=2,
+            policy_noise=0.2,
     ):
 
-        key, skey = jax.random.split(jax.random.key(0))
+        self.key = jax.random.key(0)
+        self.key, skey = jax.random.split(self.key)
         self.actor = Actor(input_dim, action_dim, max_action)
-        actor_params = self.actor.init(key, jnp.empty((1, input_dim)))
+        actor_params = self.actor.init(skey, jnp.empty((1, input_dim)))
         actor_optimizer = optax.adam(3e-4)
         self.actor_state = train_state.TrainState.create(
             apply_fn=self.actor.apply,
@@ -94,6 +96,7 @@ class TD3(object):
         )
         self.actor_target_params = copy.deepcopy(actor_params)
         
+        self.key, skey = jax.random.split(self.key)
         self.critic = Critic(input_dim, action_dim, max_action)
         critic_params = self.critic.init(skey, jnp.empty((1, input_dim)), jnp.empty((1, action_dim)))
         critic_optimizer = optax.adam(3e-4)
@@ -104,6 +107,8 @@ class TD3(object):
         )
         self.critic_target_params = copy.deepcopy(critic_params)
 
+        self.policy_noise = policy_noise
+        self.max_action = max_action
         self.gamma = gamma
         self.tau = tau
         self.policy_delay = policy_delay
@@ -131,8 +136,10 @@ class TD3(object):
             critic_target_params,
             actor_params,
             actor_target_params,
+            noise,
     ):
         next_action = jax.lax.stop_gradient(self.actor.apply(actor_target_params, next_state))
+        next_action = (next_action + noise).clip(-self.max_action, self.max_action)
         next_q1, next_q2 = jax.lax.stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
         
         target_q = reward + jnp.minimum(next_q1, next_q2) * self.gamma * not_done
@@ -168,10 +175,11 @@ class TD3(object):
             critic_target_params,
             actor_state,
             actor_target_params,
+            noise,
     ):
         critic_grads = jax.grad(self.critic_loss, argnums=5)(state, action, next_state, reward, not_done, 
                                                              critic_state.params, critic_target_params,
-                                                             actor_state.params, actor_target_params)
+                                                             actor_state.params, actor_target_params, noise)
 
         critic_state.apply_gradients(grads=critic_grads)
         return critic_state
@@ -213,8 +221,14 @@ class TD3(object):
             replay_buffer,
             batch_size,
     ):
+        self.iter+=1
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
         
+        self.key, skey = jax.random.split(self.key)
+        noise = (
+            jax.random.normal(skey, action.shape) * self.policy_noise
+        ).clip(-self.max_action, self.max_action)
+
         self.critic_state = \
         self.update_Q(
             state,
@@ -226,6 +240,7 @@ class TD3(object):
             self.critic_target_params,
             self.actor_state,
             self.actor_target_params,
+            noise,
         )
 
         if self.iter % self.policy_delay == 0:
@@ -242,6 +257,3 @@ class TD3(object):
                 self.actor_state,
                 self.actor_target_params,
             )
-        
-        self.iter+=1
-                                                                                                    
