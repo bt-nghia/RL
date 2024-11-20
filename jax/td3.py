@@ -242,6 +242,3 @@ class TD3(object):
 
             self.critic_target_params = soft_update(self.critic_target_params, self.critic_state.params)
             self.actor_target_params = soft_update(self.actor_target_params, self.actor_state.params)            
-
-if __name__ == "__main__":
-    algo = TD3_2(10, 10, 1, 0.99, 0.99, 2)
