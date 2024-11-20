@@ -114,13 +114,16 @@ class TD3(object):
         critic_target_params,
         actor_params,
         actor_target_params,
+        key,
     ):
         
-        noise = (np.random.normal(size=action.shape) * self.policy_noise).clip(-self.noise_clip, self.noise_clip) # very important
-        next_action = jax.lax.stop_gradient(self.actor.apply(actor_target_params, next_state))
+        # noise = (np.random.normal(size=action.shape) * self.policy_noise).clip(-self.noise_clip, self.noise_clip) # very important
+        noise = (jax.random.normal(key, shape=action.shape) * self.policy_noise).clip(-self.noise_clip, self.noise_clip)
+        next_action = self.actor.apply(actor_target_params, next_state)
         next_action = (next_action + noise).clip(-self.max_action, self.max_action)
-        next_q1, next_q2 = jax.lax.stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
-        target_q = reward + self.gamma * not_done * jnp.minimum(next_q1, next_q2)
+        next_q1, next_q2 = self.critic.apply(critic_target_params, next_state, next_action)
+        next_q = jax.lax.min(next_q1, next_q2)
+        target_q = jax.lax.stop_gradient(reward + self.gamma * not_done * next_q)
 
         cur_q1, cur_q2 = self.critic.apply(critic_params, state, action)
         loss = jnp.mean((cur_q1 - target_q)**2) + jnp.mean((cur_q2 - target_q)**2)
@@ -138,6 +141,7 @@ class TD3(object):
         critic_target_params,
         actor_state,
         actor_target_params,
+        key,
     ):
         critic_grad = jax.grad(self.critic_loss, argnums=5)(
             state,
@@ -149,6 +153,7 @@ class TD3(object):
             critic_target_params,
             actor_state.params,
             actor_target_params,
+            key,
         )
         critic_state = critic_state.apply_gradients(grads=critic_grad)
         return critic_state
@@ -213,6 +218,7 @@ class TD3(object):
         batch_size
     ):
         self.it+=1
+        self.key, skey = jax.random.split(self.key)
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
 
         self.critic_state = self.update_critic(
@@ -225,6 +231,7 @@ class TD3(object):
             self.critic_target_params,
             self.actor_state,
             self.actor_target_params,
+            skey,
         )
 
         if self.it % self.policy_delay == 0:
