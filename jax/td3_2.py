@@ -5,6 +5,7 @@ import optax
 from flax.training.train_state import TrainState
 
 import copy
+import numpy as np
 import functools
 
 
@@ -58,14 +59,19 @@ class TD3_2(object):
             input_dim,
             action_dim,
             max_action,
-            gamma,
-            tau,
+            gamma=0.99,
+            tau=0.005,
             policy_delay=2,
+            noise_clip=0.5,
+            policy_noise=0.2,
     ):
         self.it = 0
         self.gamma = gamma
         self.tau = tau
         self.policy_delay = policy_delay
+        self.policy_noise = policy_noise
+        self.noise_clip = noise_clip
+        self.max_action = max_action
 
         self.key = jax.random.key(0)
         self.key, skey = jax.random.split(self.key)
@@ -109,7 +115,10 @@ class TD3_2(object):
         actor_params,
         actor_target_params,
     ):
+        
+        noise = (np.random.normal(size=action.shape) * self.policy_noise).clip(-self.noise_clip, self.noise_clip) # very important
         next_action = jax.lax.stop_gradient(self.actor.apply(actor_target_params, next_state))
+        next_action = (next_action + noise).clip(-self.max_action, self.max_action)
         next_q1, next_q2 = jax.lax.stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
         target_q = reward + self.gamma * not_done * jnp.minimum(next_q1, next_q2)
 
