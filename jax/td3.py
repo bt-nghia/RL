@@ -1,33 +1,43 @@
-"""
-TODO(bt-nghia): check algo reduce critic opt fr 2 to 1
-combine 2 critic
-"""
-
-import copy
-import functools
-
 import jax
-import optax
 import jax.numpy as jnp
 import flax.linen as nn
-import flax.training.train_state as train_state
+import optax
+from flax.training.train_state import TrainState
+
+import copy
+import numpy as np
+import functools
+
 
 @jax.jit
-def mse_loss(a, b):
-    return jnp.mean(jnp.square(a-b))
+def soft_update(target_params, online_params, tau: float = 0.005):
+    return jax.tree.map(lambda x, y: (1 - tau) * x + tau * y, target_params, online_params)
 
-@jax.jit
-def polyak_update(src, tgt, tau):
-    params = jax.tree.map(
-        lambda src, tgt: src * tau + tgt * (1.0-tau),
-        src,
-        tgt
-    )
-    return params
 
+class Critic(nn.Module):
+
+    def setup(self):
+        self.ln1 = nn.Dense(256)
+        self.ln2 = nn.Dense(256)
+        self.ln3 = nn.Dense(1)
+
+        self.ln4 = nn.Dense(256)
+        self.ln5 = nn.Dense(256)
+        self.ln6 = nn.Dense(1)
+
+    def __call__(self, state, action):
+        inp = jnp.concat([state, action], axis=1)
+        out1 = nn.relu(self.ln1(inp))
+        out1 = nn.relu(self.ln2(out1))
+        out1 = self.ln3(out1)
+
+        out2 = nn.relu(self.ln4(inp))
+        out2 = nn.relu(self.ln5(out2))
+        out2 = self.ln6(out2)
+        return out1, out2
+    
 
 class Actor(nn.Module):
-    input_dim: int
     action_dim: int
     max_action: float
 
@@ -43,204 +53,186 @@ class Actor(nn.Module):
         return out
     
 
-class Critic(nn.Module):
-    input_dim: int
-    action_dim: int
-    max_action: float
-
-    def setup(self):
-        self.crt1 = nn.Sequential([
-            nn.Dense(256),
-            nn.relu,
-            nn.Dense(256),
-            nn.relu,
-            nn.Dense(1)
-        ])
-
-        self.crt2 = nn.Sequential([
-            nn.Dense(256),
-            nn.relu,
-            nn.Dense(256),
-            nn.relu,
-            nn.Dense(1)
-        ])
-
-    def __call__(self, state, action):
-        inp = jnp.concat([state, action], axis=1)
-        out1 = self.crt1(inp)
-        out2 = self.crt2(inp)
-        return out1, out2
-    
-
 class TD3(object):
     def __init__(
-            self, 
-            input_dim, 
-            action_dim, 
-            max_action, 
-            gamma, 
-            tau,
-            policy_delay=2,
-            policy_noise=0.2,
+        self,
+        input_dim,
+        action_dim,
+        max_action,
+        gamma=0.99,
+        tau=0.005,
+        policy_delay=2,
+        noise_clip=0.5,
+        policy_noise=0.2,
     ):
-
-        self.key = jax.random.key(0)
-        self.key, skey = jax.random.split(self.key)
-        self.actor = Actor(input_dim, action_dim, max_action)
-        actor_params = self.actor.init(skey, jnp.empty((1, input_dim)))
-        actor_optimizer = optax.adam(3e-4)
-        self.actor_state = train_state.TrainState.create(
-            apply_fn=self.actor.apply,
-            params=actor_params,
-            tx=actor_optimizer,
-        )
-        self.actor_target_params = copy.deepcopy(actor_params)
-        
-        self.key, skey = jax.random.split(self.key)
-        self.critic = Critic(input_dim, action_dim, max_action)
-        critic_params = self.critic.init(skey, jnp.empty((1, input_dim)), jnp.empty((1, action_dim)))
-        critic_optimizer = optax.adam(3e-4)
-        self.critic_state = train_state.TrainState.create(
-            apply_fn=self.critic.apply,
-            params=critic_params,
-            tx=critic_optimizer,
-        )
-        self.critic_target_params = copy.deepcopy(critic_params)
-
-        self.policy_noise = policy_noise
-        self.max_action = max_action
+        self.it = 0
         self.gamma = gamma
         self.tau = tau
         self.policy_delay = policy_delay
-        self.iter = 0
+        self.policy_noise = policy_noise
+        self.noise_clip = noise_clip
+        self.max_action = max_action
 
+        self.key = jax.random.key(0)
+        self.key, skey = jax.random.split(self.key)
+        self.actor = Actor(action_dim, max_action)
+        actor_params = self.actor.init(skey, jnp.empty((1, input_dim)))
+        actor_opt = optax.adam(3e-4)
+        self.actor_state = TrainState.create(
+            apply_fn=self.actor.apply,
+            params=actor_params,
+            tx=actor_opt,
+        )
+
+        self.key, skey = jax.random.split(self.key)
+        self.critic = Critic()
+        critic_params = self.critic.init(skey, jnp.empty((1, input_dim)), jnp.empty((1, action_dim)))
+        critic_opt = optax.adam(3e-4)
+        self.critic_state = TrainState.create(
+            apply_fn=self.critic.apply,
+            params=critic_params,
+            tx=critic_opt,
+        )
+
+        self.actor_target_params = copy.deepcopy(actor_params)
+        self.critic_target_params = copy.deepcopy(critic_params)
+
+        del actor_opt
         del actor_params
+        del critic_opt
         del critic_params
-        del actor_optimizer
-        del critic_optimizer
+        
+    @functools.partial(jax.jit, static_argnums=0)
+    def critic_loss(
+        self,
+        state,
+        action,
+        reward,
+        next_state,
+        not_done,
+        critic_params,
+        critic_target_params,
+        actor_params,
+        actor_target_params,
+    ):
+        
+        noise = (np.random.normal(size=action.shape) * self.policy_noise).clip(-self.noise_clip, self.noise_clip) # very important
+        next_action = jax.lax.stop_gradient(self.actor.apply(actor_target_params, next_state))
+        next_action = (next_action + noise).clip(-self.max_action, self.max_action)
+        next_q1, next_q2 = jax.lax.stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
+        target_q = reward + self.gamma * not_done * jnp.minimum(next_q1, next_q2)
 
+        cur_q1, cur_q2 = self.critic.apply(critic_params, state, action)
+        loss = jnp.mean((cur_q1 - target_q)**2) + jnp.mean((cur_q2 - target_q)**2)
+        return loss
+
+    @functools.partial(jax.jit, static_argnums=0)
+    def update_critic(
+        self,
+        state,
+        action,
+        reward,
+        next_state,
+        not_done,
+        critic_state,
+        critic_target_params,
+        actor_state,
+        actor_target_params,
+    ):
+        critic_grad = jax.grad(self.critic_loss, argnums=5)(
+            state,
+            action,
+            reward,
+            next_state,
+            not_done,
+            critic_state.params,
+            critic_target_params,
+            actor_state.params,
+            actor_target_params,
+        )
+        critic_state = critic_state.apply_gradients(grads=critic_grad)
+        return critic_state
+    
+    @functools.partial(jax.jit, static_argnums=0)
+    def actor_loss(
+        self,
+        state,
+        action,
+        reward,
+        next_state,
+        not_done,
+        critic_params,
+        critic_target_params,
+        actor_params,
+        actor_target_params,
+    ):
+        act = self.actor.apply(actor_params, state)
+        q1, q2 = self.critic.apply(critic_params, state, act)
+        act_loss = -q1.mean()
+        return act_loss
+    
+    @functools.partial(jax.jit, static_argnums=0)
+    def update_actor(
+        self,
+        state,
+        action,
+        reward,
+        next_state,
+        not_done,
+        critic_state,
+        critic_target_params,
+        actor_state,
+        actor_target_params,
+    ):
+        actor_grad = jax.grad(self.actor_loss, argnums=7)(
+            state,
+            action,
+            reward,
+            next_state,
+            not_done,
+            critic_state.params,
+            critic_target_params,
+            actor_state.params,
+            actor_target_params,
+        )
+
+        actor_state = actor_state.apply_gradients(grads=actor_grad)
+        return actor_state
+    
     @functools.partial(jax.jit, static_argnums=0)
     def policy(self, state, params):
         state = jnp.array(state).reshape(1, -1)
         return self.actor.apply(params, state).flatten()
 
-    @functools.partial(jax.jit, static_argnums=0)
-    def critic_loss(
-            self,
-            state,
-            action,
-            next_state,
-            reward,
-            not_done,
-            critic_params,
-            critic_target_params,
-            actor_params,
-            actor_target_params,
-            noise,
-    ):
-        next_action = jax.lax.stop_gradient(self.actor.apply(actor_target_params, next_state))
-        next_action = (next_action + noise).clip(-self.max_action, self.max_action)
-        next_q1, next_q2 = jax.lax.stop_gradient(self.critic.apply(critic_target_params, next_state, next_action))
-        
-        target_q = reward + jnp.minimum(next_q1, next_q2) * self.gamma * not_done
-        current_q1, current_q2 = self.critic.apply(critic_params, state, action)
-        loss = mse_loss(current_q1, target_q) + mse_loss(current_q2, target_q)
-        return loss
-    
-    @functools.partial(jax.jit, static_argnums=0)
-    def actor_loss(
-            self,
-            state,
-            action,
-            next_state,
-            reward,
-            not_done,
-            critic_params,
-            critic_target_params,
-            actor_params,
-            actor_target_params,
-    ):
-        qvalue1, qvalue2 = self.critic.apply(critic_params, state, self.actor.apply(actor_params, state))
-        return -qvalue1.mean()
-
-    @functools.partial(jax.jit, static_argnums=0)
-    def update_Q(
-            self,
-            state,
-            action,
-            next_state,
-            reward,
-            not_done,
-            critic_state,
-            critic_target_params,
-            actor_state,
-            actor_target_params,
-            noise,
-    ):
-        critic_grads = jax.grad(self.critic_loss, argnums=5)(state, action, next_state, reward, not_done, 
-                                                             critic_state.params, critic_target_params,
-                                                             actor_state.params, actor_target_params, noise)
-
-        critic_state.apply_gradients(grads=critic_grads)
-        return critic_state
-    
-    @functools.partial(jax.jit, static_argnums=0)
-    def update_pi(
-            self,
-            state,
-            action,
-            next_state,
-            reward,
-            not_done,
-            critic_state,
-            critic_target_params,
-            actor_state,
-            actor_target_params,
-    ):
-        actor_grad = jax.grad(self.actor_loss, argnums=7)(state, action, next_state, reward, not_done, 
-                                                          critic_state.params, critic_target_params, 
-                                                          actor_state.params, actor_target_params)
-
-        actor_state = actor_state.apply_gradients(grads=actor_grad)
-        return actor_state
-
     def select_action(self, state):
         return self.policy(state, self.actor_state.params)
-
+    
     def train(
-            self,
-            replay_buffer,
-            batch_size,
+        self,
+        replay_buffer,
+        batch_size
     ):
-        self.iter+=1
+        self.it+=1
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
-        
-        self.key, skey = jax.random.split(self.key)
-        noise = (
-            jax.random.normal(skey, action.shape) * self.policy_noise
-        ).clip(-self.max_action, self.max_action)
 
-        self.critic_state = \
-        self.update_Q(
+        self.critic_state = self.update_critic(
             state,
             action,
-            next_state,
             reward,
+            next_state,
             not_done,
             self.critic_state,
             self.critic_target_params,
             self.actor_state,
             self.actor_target_params,
-            noise,
         )
 
-        if self.iter % self.policy_delay == 0:
-            self.actor_state = \
-            self.update_pi(
+        if self.it % self.policy_delay == 0:
+            self.actor_state = self.update_actor(
                 state,
                 action,
-                next_state,
                 reward,
+                next_state,
                 not_done,
                 self.critic_state,
                 self.critic_target_params,
@@ -248,5 +240,8 @@ class TD3(object):
                 self.actor_target_params,
             )
 
-            self.actor_target_params = copy.deepcopy(polyak_update(self.actor_state.params, self.actor_target_params, self.tau))
-            self.critic_target_params = copy.deepcopy(polyak_update(self.critic_state.params, self.critic_target_params, self.tau))
+            self.critic_target_params = soft_update(self.critic_target_params, self.critic_state.params)
+            self.actor_target_params = soft_update(self.actor_target_params, self.actor_state.params)            
+
+if __name__ == "__main__":
+    algo = TD3_2(10, 10, 1, 0.99, 0.99, 2)

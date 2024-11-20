@@ -55,15 +55,15 @@ class Actor(nn.Module):
 
 class TD3_2(object):
     def __init__(
-            self,
-            input_dim,
-            action_dim,
-            max_action,
-            gamma=0.99,
-            tau=0.005,
-            policy_delay=2,
-            noise_clip=0.5,
-            policy_noise=0.2,
+        self,
+        input_dim,
+        action_dim,
+        max_action,
+        gamma=0.99,
+        tau=0.005,
+        policy_delay=2,
+        noise_clip=0.5,
+        policy_noise=0.2,
     ):
         self.it = 0
         self.gamma = gamma
