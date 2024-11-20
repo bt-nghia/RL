@@ -5,6 +5,7 @@ import argparse
 import os
 
 from ddpg import DDPG
+from td3 import TD3
 from utils import ReplayBuffer
 
 
@@ -78,7 +79,8 @@ if __name__ == "__main__":
         "tau": args.tau,
     }
 
-    policy = DDPG(**kwargs)
+    # policy = DDPG(**kwargs)
+    policy = TD3(**kwargs)
 
     replay_buffer = ReplayBuffer(input_dim, action_dim)
     evaluations = [eval_policy(policy, args.env, args.seed)]
